@@ -1,0 +1,135 @@
+---
+title: "result_eval"
+output: html_document
+date: "2025-11-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+
+```{r}
+library(phyloseq)
+library(microbiome)
+library(igraph)
+library(data.tree)
+library(ape)
+library(ggplot2)
+library(dplyr)
+library(mvtnorm)
+library(pheatmap)
+source("R/helper.R")
+source("config/config_real_data.R")
+chain = 1 # default use the chain 1
+color_palette <- colorRampPalette(c("blue", "white", "red"))(100)
+breaks_values <- seq(-1, 1, length.out = 101)
+```
+
+```{r}
+load("data/processed/processed_obj")
+n = nrow(Y)
+p = ncol(Y)
+d = ncol(X)
+```
+
+```{r}
+WAIC_results <- numeric(length(ranks))
+for(rank in ranks){
+  load(paste0("results/output/Yatsunenko/LTNM_R_", rank, "_cov_reg_chain_", chain, "_iter_", 9))
+  WAIC_results[rank] = WAIC
+}
+WAIC_results
+```
+
+```{r}
+R = 4
+load(paste0("results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", chain, "_iter_", 9))
+```
+
+```{r}
+post_mean_CI = matrix(NA, p, d)
+for(i in 1:p){
+  for(j in 1:d){
+    post_mean_CI_entry = sapply(result[[3]], function(M) M[i, j]) %>% quantile(probs = c(0.025, 0.975))
+    post_mean_CI[i,j] = ifelse(0 < post_mean_CI_entry[1] | 0 > post_mean_CI_entry[2], 1, 0)
+  }
+}
+apply(post_mean_CI, 2, mean)
+```
+
+```{r}
+post_mean_CI_diff = numeric(p)
+for(i in 1:p){
+    post_mean_CI_entry = sapply(result[[3]], function(M) M[i,3]-M[i,4]) %>% quantile(probs = c(0.025, 0.975))
+    post_mean_CI_diff[i] = ifelse(0 < post_mean_CI_entry[1] | 0 > post_mean_CI_entry[2], 1, 0)
+}
+mean(post_mean_CI_diff)
+```
+
+```{r}
+DiffNetwork = function(result, X1, X2, niter = length(result[[1]]), burnin = niter/2, p = dim(result[[2]][[1]])[1], R = dim(result[[2]][[1]])[3]){
+  #' Compute the differential correlation network with covariate X1 and X2
+  diff_list = array(NA, dim = c(niter-burnin, p, p))
+  for(iter in (burnin+1):niter){
+    Theta_1 <- Theta_2 <- matrix(0,p,p)
+    for(r in 1:R){
+      Theta_1 = Theta_1 + result[[2]][[iter]][,,r]%*%X1%*%t(X1)%*%t(result[[2]][[iter]][,,r])
+      Theta_2 = Theta_2 + result[[2]][[iter]][,,r]%*%X2%*%t(X2)%*%t(result[[2]][[iter]][,,r])
+    }
+    diff_list[iter-burnin,,] = Theta_1-Theta_2
+}
+  post_diff = apply(diff_list, c(2,3), mean)
+  post_CI = apply(diff_list, c(2,3), function(x){CI = quantile(x, probs = c(0.025, 0.975)) 
+  return(0 > CI[1] & 0 < CI[2])})
+  print(sum(!post_CI[upper.tri(post_CI, diag = T)]))
+  return(list(post_diff, post_CI))
+}
+```
+
+1. Differential networks
+```{r}
+sex_diff = DiffNetwork(result, c(1,0,0,0,1), c(0,0,0,0,1))
+age_diff = DiffNetwork(result, c(0,1,0,0,1), c(0,0,0,0,1))
+malawi_diff = DiffNetwork(result, c(0,0,1,0,1), c(0,0,0,0,1))
+vene_diff = DiffNetwork(result, c(0,0,0,1,1), c(0,0,0,0,1))
+malawi_vene_diff = DiffNetwork(result, c(0,0,0,1,1), c(0,0,1,0,1))
+```
+
+```{r}
+par(mfrow = c(2,3))
+sex_diff[[1]][upper.tri(sex_diff[[1]], diag = T)] %>% hist(breaks = 50, xlim = c(-20,20), main = "Sex")
+age_diff[[1]][upper.tri(sex_diff[[1]], diag = T)] %>% hist(breaks = 50, xlim = c(-20,20), main = "Age")
+malawi_diff[[1]][upper.tri(sex_diff[[1]], diag = T)] %>% hist(breaks = 50, xlim = c(-20,20), main = "Malawi vs USA")
+vene_diff[[1]][upper.tri(sex_diff[[1]], diag = T)] %>% hist(breaks = 50, xlim = c(-20,20), main = "Vene vs USA")
+malawi_vene_diff[[1]][upper.tri(sex_diff[[1]], diag = T)] %>% hist(breaks = 50, xlim = c(-20,20), main = "Malawi vs Vene")
+(malawi_vene_diff[[1]]-vene_diff[[1]])[upper.tri(sex_diff[[1]], diag = T)] %>% hist(breaks = 50, xlim = c(-20,20), main = "Malawi vs Vene")
+```
+
+```{r}
+EffectEval = function(result, j, niter = length(result[[1]]), burnin = niter/2, p = dim(result[[2]][[1]])[1], R = dim(result[[2]][[1]])[3]){
+  #' Compute the differential correlation network with covariate X1 and X2
+  effect_list = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])
+}
+```
+
+```{r}
+sex_effect = EffectEval(result, 1)
+age_effect = EffectEval(result, 2)
+malawi_effect = EffectEval(result, 3)
+vene_effect = EffectEval(result, 4)
+malawi_vene_effect = unlist(lapply(result[[2]], function(x){norm(x[,3,]-x[,4,], "F")})[(burnin+1):niter])
+```
+
+```{r}
+hist(sex_effect, breaks = 50, col = adjustcolor("steelblue", 0.5), xlab = "Value", main = "Posterior effect size", xlim = c(0,20))
+hist(age_effect, breaks = 50, col = adjustcolor("darkred", 0.5), add = TRUE)
+hist(malawi_effect, breaks = 50, col = adjustcolor("seagreen", 0.5), add = TRUE)
+hist(vene_effect, breaks = 50, col = adjustcolor("grey", 0.5), add = TRUE)
+hist(malawi_vene_effect, breaks = 50, col = adjustcolor("pink", 0.5), add = TRUE)
+legend("topleft", fill = adjustcolor(c("steelblue","darkred","seagreen","grey","pink"), 0.4),
+       legend = c("Sex","Age","Malawi vs USA","USA vs Vene","Malawi vs Vene"))
+```
+
+```{r}
+```

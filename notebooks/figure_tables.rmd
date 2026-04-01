@@ -1,0 +1,188 @@
+---
+title: "Simulation figures"
+output: html_notebook
+---
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(xtable)
+library(ggpubr)
+```
+
+# Simulation main figure
+```{r}
+ns = c(150, 250)
+p = 100
+sparse = 0.5
+Theta_structures = c("off", "scale", "tree")
+Theta_structures_names = c("tridiagonal", "scale-free", "tree-based")
+methods = c("cov_est", "LTNM_R_cov_reg", "R_cov_reg", "oracle_R_cov_reg")
+methods_names = c("gLASSO", "TRECOR", "CovReg", "TRECOR oracle")
+names(methods_names) = methods
+names(Theta_structures_names) = Theta_structures
+glist_ROC = list()
+glist_PR = list()
+full_mse = data.frame(
+  n = integer(0),
+  structure = character(0),
+  methods  = character(0),
+  Theta_mean = numeric(0),
+  Theta_sd = numeric(0),
+  Sigma_mean = numeric(0),
+  Sigma_sd = numeric(0),
+  AUC_mean = numeric(0),
+  AUC_sd = numeric(0)
+)
+for(n in ns){
+  for(struc in Theta_structures){
+    prefix = paste("n",n, "p",p, "sparse", sparse, struc, "roc", "mse", sep="_")
+    print(prefix)
+    load(paste0("~/Research_projects/tree_cov_reg/results/tables/simu_", prefix))
+    gROC = ggplot(roc_data[-1,], aes(x = FPR, y = TPR, color = as.factor(methods), linetype = as.factor(methods))) +
+  geom_line() +
+  labs(title = paste0("n = ", n, ", ", Theta_structures_names[struc]),
+       x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Group") +
+  theme_minimal() + 
+      scale_color_discrete(name = "Methods",
+                           labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg")) +
+      scale_linetype_manual(name = "Methods",
+                            values = c("dashed", "solid", "longdash", "dotdash"), 
+                            labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))
+    gPR = ggplot(roc_data[-1,], aes(x = TPR, y = PPV, color = as.factor(methods), linetype = as.factor(methods))) +
+  geom_line() +
+  labs(title = paste0("n = ", n, ", ", Theta_structures_names[struc]),
+       y = "Positive Prediction Value",
+       x = "True Positive Rate",
+       color = "Group") +
+  theme_minimal()+ 
+      scale_color_discrete(name = "Methods",
+                           labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))+
+      scale_linetype_manual(name = "Methods",
+                            values = c("dashed", "solid", "longdash", "dotdash"), 
+                            labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))
+    
+    glist_ROC[[length(glist_ROC) + 1]] <- gROC
+    glist_PR[[length(glist_PR) + 1]] <- gPR
+    mse_data$n = n
+    mse_data$structure = struc
+    mse_data = mse_data[-1, c(8,9,7, 1:6)]
+    full_mse = rbind(full_mse, mse_data)
+  }
+}
+full_mse$structure = Theta_structures_names[full_mse$structure]
+full_mse$methods = methods_names[full_mse$methods]
+full_mse = full_mse %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+# pdf("~/Research_projects/tree_cov_reg/results/figures/simu/main_ROC.pdf", width = 10, height = 6, onefile = TRUE)
+# ggarrange(plotlist = glist_ROC, common.legend = T, legend = "bottom") %>% print()
+# dev.off()
+
+# pdf("~/Research_projects/tree_cov_reg/results/figures/simu/main_PR.pdf", width = 10, height = 6, onefile = TRUE)
+# ggarrange(plotlist = glist_PR, common.legend = T, legend = "bottom") %>% print()
+# dev.off()
+```
+# Sparsity figure
+```{r}
+n = 150
+p = 100
+struc = "tree"
+sparse_levels = c(0.3, 0.5, 0.7)
+Theta_structures = "tree"
+Theta_structures_names = "tree-based"
+methods = c("cov_est", "LTNM_R_cov_reg", "R_cov_reg", "oracle_R_cov_reg")
+methods_names = c("gLASSO", "proposed", "proposed Gaussian", "proposed oracle")
+names(methods_names) = methods
+names(Theta_structures_names) = Theta_structures
+glist_ROC <- glist_PR <- list() 
+full_mse = data.frame(
+  n = integer(0),
+  sparse = character(0),
+  structure = character(0),
+  methods  = character(0),
+  Theta_mean = numeric(0),
+  Theta_sd = numeric(0),
+  Sigma_mean = numeric(0),
+  Sigma_sd = numeric(0),
+  AUC_mean = numeric(0),
+  AUC_sd = numeric(0)
+)
+for(sparse in sparse_levels){
+  prefix = paste("n",n, "p",p, "sparse", sparse, struc, "roc", "mse", sep="_")
+    print(prefix)
+    load(paste0("~/Research_projects/tree_cov_reg/results/tables/simu_", prefix))
+    gROC = ggplot(roc_data[-1,], aes(x = FPR, y = TPR, color = as.factor(methods), linetype = as.factor(methods))) +
+  geom_line() +
+  labs(title = paste0("ROC curves, threshold = ", sparse),
+       x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Group") +
+  theme_minimal() + 
+      scale_color_discrete(name = "Methods",
+                           labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))+
+      scale_linetype_manual(name = "Methods",
+                            values = c("dashed", "solid", "longdash", "dotdash"), 
+                            labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))
+    gPR = ggplot(roc_data[-1,], aes(x = TPR, y = PPV, color = as.factor(methods), linetype = as.factor(methods))) +
+  geom_line() +
+  labs(title = paste0("PR curves, threshold = ", sparse),
+       y = "Positive Prediction Value",
+       x = "True Positive Rate",
+       color = "Group") +
+  theme_minimal()+
+      scale_color_discrete(name = "Methods",
+                           labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))+
+      scale_linetype_manual(name = "Methods",
+                            values = c("dashed", "solid", "longdash", "dotdash"), 
+                            labels = c("gLASSO", "TRECOR", "TRECOR oracle", "CovReg"))
+    glist_ROC[[length(glist_ROC) + 1]] <- gROC
+    glist_PR[[length(glist_PR) + 1]] <- gPR
+    mse_data$n = n
+    mse_data$structure = struc
+    mse_data = mse_data[-1, c(8,9,7, 1:6)]
+    mse_data$sparse = sparse
+    full_mse = rbind(full_mse, mse_data)
+}
+full_mse$structure = Theta_structures_names[full_mse$structure]
+full_mse$methods = methods_names[full_mse$methods]
+full_mse = full_mse %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+# pdf("~/Research_projects/tree_cov_reg/results/figures/simu/sparsity.pdf", width = 10, height = 6, onefile = TRUE)
+# ggarrange(plotlist = c(glist_ROC, glist_PR), common.legend = T, legend = "bottom", nrow = 2, ncol = 3)
+# dev.off()
+```
+# Hyperparameter figure
+```{r}
+load(paste0("~/Research_projects/tree_cov_reg/results/tables/simu_n_150_p_100_sparse_0.5_tree_roc_mse"))
+mse_data_5_5_0.5_0.5 = mse_data[mse_data$methods == "LTNM_R_cov_reg",-7]
+roc_data_5_5_0.5_0.5 = roc_data[roc_data$methods == "LTNM_R_cov_reg",-4]
+mse_data_5_5_0.5_0.5$params = paste0("(",5,",",5,",",0.5,",",0.5,")")
+roc_data_5_5_0.5_0.5$params = paste0("(",5,",",5,",",0.5,",",0.5,")")
+load(paste0("~/Research_projects/tree_cov_reg/results/tables/simu_hyper_roc_mse"))
+mse_data[5,] = mse_data_5_5_0.5_0.5[2,]
+roc_data = rbind(roc_data, roc_data_5_5_0.5_0.5[-1,])
+
+gROC = ggplot(roc_data[-1,], aes(x = FPR, y = TPR, color = as.factor(params), linetype = as.factor(params))) +
+  geom_line() +
+  labs(title = "ROC Curves",
+       x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Hyperparameters") +
+  theme_minimal()
+gPR = ggplot(roc_data[-1,], aes(x = TPR, y = PPV, color = as.factor(params), linetype = as.factor(params))) +
+  geom_line() +
+  labs(title = "PR Curves",
+       y = "Positive Prediction Value",
+       x = "True Positive Rate",
+       color = "Hyperparameters") +
+  theme_minimal()
+# pdf("~/Research_projects/tree_cov_reg/results/figures/simu/hyper_ROC_PR.pdf", width = 8, height = 4, onefile = TRUE)
+# ggarrange(gROC, gPR, common.legend = T, legend = "bottom") %>% print()
+# dev.off()
+```
+```

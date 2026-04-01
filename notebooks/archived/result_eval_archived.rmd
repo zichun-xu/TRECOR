@@ -1,0 +1,159 @@
+---
+title: "Yatsunenko_results"
+output: html_notebook
+---
+
+This notebook is used for evaluate and interpret the results on the data Yatsunenko et al (2012). 
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+```{r}
+library(phyloseq)
+library(microbiome)
+library(igraph)
+library(data.tree)
+library(ape)
+library(ggplot2)
+library(dplyr)
+library(mvtnorm)
+library(pheatmap)
+source("R/helper.R")
+source("config/config_real_data.R")
+chain = 1 # default use the chain 1
+color_palette <- colorRampPalette(c("blue", "white", "red"))(100)
+breaks_values <- seq(-1, 1, length.out = 101)
+```
+```{r}
+load("data/processed/processed_obj")
+n = nrow(Y)
+p = ncol(Y)
+d = ncol(X)
+```
+
+
+### Select the best rank based on WAIC
+```{r}
+WAIC_results <- numeric(length(ranks))
+for(rank in ranks){
+  load(paste0("results/output/Yatsunenko/LTNM_R_", rank, "_cov_reg_chain_", chain, "_iter_", 9))
+  WAIC_results[rank] = WAIC
+}
+WAIC_results
+```
+Rank 4 minimizes WAIC.
+
+### Compare WAIC with other methods
+```{r}
+WAIC_normalized_results <- numeric(length(ranks))
+for(rank in ranks){
+  load(paste0("results/output/Yatsunenko/R_", rank, "_cov_reg_chain_", chain, "_iter_", 1))
+  WAIC_normalized_results[rank] = WAIC
+}
+WAIC_normalized_results
+```
+
+### Load results
+```{r}
+R = 4
+load(paste0("results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", chain, "_iter_", 9))
+```
+
+### Mean-level analysis
+We compute the 95% credible interval for each (i,j)-th entry of $B_0$, and calculate the propotion of credible intervals that does not contain 0 for each covariate (column). 
+```{r}
+post_mean_CI = matrix(NA, p, d)
+for(i in 1:p){
+  for(j in 1:d){
+    post_mean_CI_entry = sapply(result[[3]], function(M) M[i, j]) %>% quantile(probs = c(0.025, 0.975))
+    post_mean_CI[i,j] = ifelse(0 < post_mean_CI_entry[1] | 0 > post_mean_CI_entry[2], 1, 0)
+  }
+}
+apply(post_mean_CI, 2, mean)
+```
+All credible intervals contain 0 for sex, suggesting that sex has no effect on microbiome abundance even on the mean level.
+
+Since the baseline group is USA, it is consistent with the original paper that both (South America) countries are significant. Next, we analyze whether the Vene and Malawi group are significantly different.
+```{r}
+post_mean_CI_diff = numeric(p)
+for(i in 1:p){
+    post_mean_CI_entry = sapply(result[[3]], function(M) M[i,3]-M[i,4]) %>% quantile(probs = c(0.025, 0.975))
+    post_mean_CI_diff[i] = ifelse(0 < post_mean_CI_entry[1] | 0 > post_mean_CI_entry[2], 1, 0)
+}
+mean(post_mean_CI_diff)
+```
+Only 7.2% of the entries are significant. Therefore, we conclude microbiome abundance in the Vene and Malawi group are similar in mean. 
+
+### Differential network analysis
+```{r}
+DiffNetwork = function(X1, X2){
+  #' Compute the differential correlation network with covariate X1 and X2
+  #' Use Bayesian edge selection to impose sparsity
+  
+  diff_cor_list = array(NA, dim = c(niter-burnin, p, p))
+  for(iter in (burnin+1):niter){
+    Sigma = result[[1]][[iter]]
+    Theta_1 <- Theta_2 <- Sigma
+    for(r in 1:R){
+      Theta_1 = Theta_1 + result[[2]][[iter]][,,r]%*%X1%*%t(X1)%*%t(result[[2]][[iter]][,,r])
+      Theta_2 = Theta_2 + result[[2]][[iter]][,,r]%*%X2%*%t(X2)%*%t(result[[2]][[iter]][,,r])
+    }
+    diff_cor_list[iter-burnin,,] = (cov2cor(Theta_1)-cov2cor(Theta_2))/2
+}
+  post_diff_cor = apply(diff_cor_list, c(2,3), mean)
+  graph_diff = GraphSelect(diff_cor_list, 0.1, 0.05)
+  post_diff_cor_sparse = post_diff_cor
+  post_diff_cor_sparse[graph_diff == 0] = 0
+  pheatmap(post_diff_cor_sparse, cluster_rows = F, cluster_cols = F, color = color_palette, breaks = breaks_values)
+  return(list(post_diff_cor, post_diff_cor_sparse))
+}
+```
+
+1. Differential network for sex
+```{r}
+sex_post_diff_cor = DiffNetwork(c(1,0,0,0,1), c(0,0,0,0,1))
+hist(sex_post_diff_cor[[1]][upper.tri(sex_post_diff_cor[[1]])], xlim = c(-1,1), breaks = 50)
+sum(sex_post_diff_cor[[2]] != 0)/2
+```
+No entry found, as expected since sex does not have a significant effect even on mean level.
+
+2. Age
+```{r}
+age_post_diff_cor = DiffNetwork(c(0,1,0,0,1), c(0,0,0,0,1))
+hist(age_post_diff_cor[[1]][upper.tri(age_post_diff_cor[[1]])], xlim = c(-1,1), breaks = 50)
+sum(age_post_diff_cor[[2]] != 0)/2
+```
+
+3. Malawi
+```{r}
+malawi_post_diff_cor = DiffNetwork(c(0,0,1,0,1), c(0,0,0,0,1))
+hist(malawi_post_diff_cor[[1]][upper.tri(malawi_post_diff_cor[[1]])], xlim = c(-1,1), breaks = 50)
+sum(malawi_post_diff_cor[[2]] != 0)/2
+```
+
+4. Vene
+```{r}
+vene_post_diff_cor = DiffNetwork(c(0,0,0,1,1), c(0,0,0,0,1))
+hist(vene_post_diff_cor[[1]][upper.tri(vene_post_diff_cor[[1]])], xlim = c(-1,1), breaks = 50)
+sum(vene_post_diff_cor[[2]] != 0)/2
+```
+4. Malawi vs Vene
+```{r}
+vene_malawi_post_diff_cor = DiffNetwork(c(0,0,0,1,1), c(0,0,1,0,1))
+hist(vene_malawi_post_diff_cor[[1]][upper.tri(vene_malawi_post_diff_cor[[1]])], xlim = c(-1,1), breaks = 50)
+sum(vene_malawi_post_diff_cor[[2]] != 0)/2
+```
+
+### Population network
+```{r}
+pop_post_diff_cor = DiffNetwork(c(0,0,0,0,1), c(0,0,0,0,0))
+hist(pop_post_diff_cor[[1]][upper.tri(pop_post_diff_cor[[1]])], xlim = c(-1,1), breaks = 50)
+sum(pop_post_diff_cor[[2]] != 0)/2
+```
+
+
+### Factor visualization
+```{r}
+
+```

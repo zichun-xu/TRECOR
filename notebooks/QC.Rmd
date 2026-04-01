@@ -1,0 +1,419 @@
+---
+title: "QC"
+output: html_notebook
+---
+
+This notebook is used for explotary analysis and quality control of the data Yatsunenko et al (2012). Processed data are used for running the covariance regression.
+
+Output:
+X, covariate matrix
+Y, response matrix in internal node scale
+N, library size matrix in internal node scale
+Phi_est, estimated log ratio in internal node scale
+phy_tree, phylogenetic tree
+adj, adjacency matrix of the phylogenetic tree
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+
+```{r}
+library(dplyr)
+library(microbiome)
+library(phyloseq)
+library(igraph)
+library(ape)
+source("../R/helper.R")
+```
+
+
+```{r}
+load("../data/raw/Yatsunenko_QIIME_processed.rda")
+```
+
+We focus our analysis on genus-level data. 
+```{r}
+study850_genus = tax_glom(study850, taxrank = "Genus", NArm = TRUE)
+summarize_phyloseq(study850_genus)
+tax_table(study850_genus)[, "Genus"] %>% duplicated() %>% sum() # there are duplicated genus
+```
+
+A second round of merge to avoid duplicated genus. No duplicated genus for the data "subset110_genus".
+```{r}
+otu = as(otu_table(study850_genus), "matrix")
+lab = tax_table(study850_genus)[,"Genus"]
+
+# Aggregate counts by identical labels
+otu_agg = rowsum(otu, group = lab, reorder = TRUE, na.rm = TRUE)
+
+# Build a minimal taxonomy table at Genus level
+genus_levels = rownames(otu_agg)
+tax_agg = cbind(Genus = genus_levels)
+rownames(tax_agg) = genus_levels
+tax_agg = as.matrix(tax_agg)
+
+# Recreate a clean genus-level phyloseq (tree is dropped here; reattach if you wish)
+study850_genus_clean = phyloseq(otu_table(otu_agg, taxa_are_rows = TRUE),
+                       tax_table(tax_agg), sample_data(study850_genus))
+```
+
+Since the phylogenetic tree is only available for the subset of 110 people. We only keep genus present in the phylogenetic tree.
+```{r}
+common_genus =intersect(as.character(tax_table(study850_genus_clean)[, "Genus"]), as.character(tax_table(subset110_genus)[, "Genus"]))
+study850_common_genus = prune_taxa(tax_table(study850_genus_clean)[, "Genus"]%in% common_genus, study850_genus_clean)
+taxa_names(study850_common_genus) <- as.character(tax_table(study850_common_genus)[, "Genus"])
+subset110_common_genus = prune_taxa(tax_table(subset110_genus)[, "Genus"]%in% common_genus, subset110_genus)
+taxa_names(subset110_common_genus) <- as.character(tax_table(subset110_common_genus)[, "Genus"])
+```
+
+
+
+```{r}
+study850_common_genus_meta = study850_common_genus@sam_data
+study850_common_genus_taxonomy = study850_common_genus@tax_table
+study850_common_genus_otu = study850_common_genus@otu_table %>% t()
+dim(study850_common_genus_otu)
+```
+
+### Explotary analysis
+Proportion of zeros:
+```{r}
+apply(study850_common_genus_otu, 2, function(x){mean(x==0)}) %>% summary()
+```
+
+Total number of reads
+```{r}
+colSums(study850_common_genus_otu) %>% hist(breaks = 50)
+```
+
+Check the mean abundance
+```{r}
+colMeans(study850_common_genus_otu) %>% hist(breaks = 50)
+```
+
+### Pre-processing
+Filter OTU based on non-zero proportion and total counts
+```{r}
+study850_common_genus_QC = prune_taxa((apply(study850_common_genus_otu, 2, function(x){mean(x==0)}) < 0.5 & colSums(study850_common_genus_otu) > 100),study850_common_genus)
+dim(otu_table(study850_common_genus_QC))
+```
+530 samples and 90 genus.
+
+### Phylogenetic tree
+Obtain the generated binary tree corresponding to the filtered genus, classify internal and leaf nodes, and calculate the distance between nodes on the tree.
+```{r}
+phy_tree = keep.tip(phy_tree(subset110_common_genus), taxa_names(study850_common_genus_QC))
+nodes <- track <- c(phy_tree$edge[1,1])
+internal = c(1)
+i = 1
+while(length(track) > 0){
+  node = track[1]
+  childern = phy_tree$edge[phy_tree$edge[,1] == node,2]
+  if(length(childern) > 0){
+    nodes = c(nodes, childern)
+    track = c(track, childern)
+    internal[i] = 1
+    internal = c(internal, numeric(length(childern)))
+  }
+  track = track[-1]
+  i = i + 1
+}
+# nodes: order of the nodes of breath-first search
+# internal: whether each node in nodes is an internal node
+
+phy_tree_igraph = graph_from_edgelist(matrix(c(phy_tree$edge[,1],
+                                        phy_tree$edge[,2]),
+                                      ncol = 2), directed = TRUE)
+adj = as.matrix(as_adjacency_matrix(phy_tree_igraph))
+adj = adj[c(nodes[internal == 1], nodes[internal == 0]),
+          c(nodes[internal == 1], nodes[internal == 0])]
+rownames(adj) <- colnames(adj) <- as.character(c(nodes[internal == 1], nodes[internal == 0]))
+adj_sym = adj + t(adj)
+dist_matrix = distances(graph_from_adjacency_matrix(adj_sym, mode = "undirected", diag = FALSE))
+```
+
+### Covariate preprocessing
+```{r}
+X <- as(sample_data(study850_common_genus_QC), "data.frame") %>%
+  mutate(
+    # sex: female = 0, male = 1
+    sex = case_when(as.character(SEX) == "male" ~ 1L, 
+                    as.character(SEX) == "female" ~ 0L, 
+                    as.character(SEX) == "unknown" ~ NA),
+    # age: (> 3) = 0, (<= 3) = 1
+    age = case_when(!is.na(as.numeric(as.character(AGE))) & as.numeric(as.character(AGE)) <= 3 ~ 0L,
+                    !is.na(as.numeric(as.character(AGE))) & as.numeric(as.numeric(as.character(AGE))) > 3 ~ 1L,
+                    is.na(as.numeric(as.character(AGE))) ~ NA),
+    # country dummies: baseline = Malawi
+    usa  = if_else(as.character(COUNTRY) == "GAZ:United States of America", 1L, 0L),
+    vene    = if_else(as.character(COUNTRY) == "GAZ:Venezuela",   1L, 0L) 
+  ) %>%
+  select(sex, age, usa, vene) %>%
+  mutate(intercept = 1)
+
+table(X$sex)
+table(X$age)
+table(X$usa)
+table(X$vene)
+```
+
+Change the baseline group to USA (skipped).
+```{r, eval=FALSE}
+X <- as(sample_data(study850_common_genus_QC), "data.frame") %>%
+  mutate(
+    # sex: female = 0, male = 1
+    sex = case_when(as.character(SEX) == "male" ~ 1L, 
+                    as.character(SEX) == "female" ~ 0L, 
+                    as.character(SEX) == "unknown" ~ NA),
+    # age: (> 3) = 0, (<= 3) = 1
+    age = case_when(!is.na(as.numeric(as.character(AGE))) & as.numeric(as.character(AGE)) <= 3 ~ 0L,
+                    !is.na(as.numeric(as.character(AGE))) & as.numeric(as.numeric(as.character(AGE))) > 3 ~ 1L,
+                    is.na(as.numeric(as.character(AGE))) ~ NA),
+    # country dummies: baseline = USA
+    malawi  = if_else(as.character(COUNTRY) == "GAZ:Malawi", 1L, 0L),
+    vene    = if_else(as.character(COUNTRY) == "GAZ:Venezuela",   1L, 0L) 
+  ) %>%
+  select(sex, age, malawi, vene) %>%
+  mutate(intercept = 1)
+```
+
+
+```{r}
+table(X$sex)
+table(X$age)
+table(X$malawi)
+table(X$vene)
+```
+
+### Convert the data to internal node scale
+```{r}
+n = ncol(otu_table(study850_common_genus_QC))
+p = nrow(otu_table(study850_common_genus_QC))-1
+Y <- N <- matrix(NA, nrow = n, ncol = p)
+for( i in 1:n ){
+  result = CountLeaf2Int(adj = adj, Y = t(otu_table(study850_common_genus_QC))[i,])
+  Y[i,] = result$Y
+  N[i,] = result$N
+}
+Phi_est = matrix(NA, nrow=n, ncol=p)
+for (i in 1:n){
+  for (j in 1:p){
+    if (N[i,j]==0){
+      Phi_est[i,j]=0
+    }
+    else{
+      tmp=Y[i,j]/N[i,j]
+      if (tmp==0){
+        Phi_est[i,j]=-5
+      }
+      else{
+        if (tmp==1){
+          Phi_est[i,j]=5
+        }
+        else{
+          Phi_est[i,j]=stats::qlogis(tmp)
+        }
+      }
+    }
+  }
+}
+```
+
+### Save processed matrix for method running
+```{r}
+na_id = rowSums(is.na(X)) > 0
+X = X[!na_id,] %>% as.matrix()
+Y = Y[!na_id,]
+N = N[!na_id,]
+Phi_est = Phi_est[!na_id,]
+# save(X, Y, N, Phi_est, phy_tree, adj, file = "data/processed/processed_obj")
+```
+
+### Normalized leaf-level data (CLR)
+```{r}
+otu_QC = t(otu_table(study850_common_genus_QC))
+otu_QC_pseudo = otu_QC
+otu_QC_pseudo[otu_QC_pseudo == 0] = 1
+otu_CLR = log(otu_QC_pseudo/apply(otu_QC_pseudo, 1, sum))
+otu_CLR = otu_CLR - apply(otu_CLR, 1, mean)
+```
+
+### Demo
+1. Distribution of feature-wise variance (covariance) with covariates
+2. Both leaf and internal node levels
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+
+sex_col  <- "sex"
+age_col  <- "age"
+usa_col  <- "usa"
+vene_col <- "vene"
+# normalized_data = Phi_est
+normalized_data = otu_CLR
+
+X_df <- as.data.frame(X)
+
+meta <- X_df %>%
+  transmute(
+    sex = factor(.data[[sex_col]],
+                 levels = c(0, 1),
+                 labels = c("female", "male")),
+    age = factor(.data[[age_col]],
+                 levels = c(0, 1),
+                 labels = c("<= 3", "> 3")),
+    country = case_when(
+      .data[[usa_col]] == 1 ~ "USA",
+      .data[[vene_col]] == 1 ~ "Venezuela",
+      TRUE ~ "Malawi"
+    ) %>% factor(levels = c("USA", "Venezuela", "Malawi"))
+  )
+
+get_feature_variance_by_group <- function(Phi, group_vec, covariate_name) {
+  group_levels <- levels(group_vec)
+  
+  out <- lapply(group_levels, function(g) {
+    idx <- which(group_vec == g)
+    v <- apply(Phi[idx, , drop = FALSE], 2, var, na.rm = TRUE)
+    data.frame(
+      covariate = covariate_name,
+      group = g,
+      feature = seq_along(v),
+      variance = as.numeric(v),
+      stringsAsFactors = FALSE
+    )
+  })
+  
+  bind_rows(out)
+}
+
+df_sex_var     <- get_feature_variance_by_group(normalized_data, meta$sex, "Sex")
+df_age_var     <- get_feature_variance_by_group(normalized_data, meta$age, "Age")
+df_country_var <- get_feature_variance_by_group(normalized_data, meta$country, "Country")
+
+sex_colors <- c("female" = "#1b9e77", "male" = "#d95f02")
+age_colors <- c("<= 3" = "#7570b3", "> 3" = "#e7298a")
+cty_colors <- c("USA" = "#66a61e", "Venezuela" = "#e6ab02", "Malawi" = "#a6761d")
+
+p_sex_var <- ggplot(df_sex_var, aes(x = group, y = variance, fill = group)) +
+  geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
+  scale_fill_manual(values = sex_colors, name = "Sex") +
+  labs(title = "Sex", x = NULL, y = "Feature-wise variance") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+p_age_var <- ggplot(df_age_var, aes(x = group, y = variance, fill = group)) +
+  geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
+  scale_fill_manual(values = age_colors, name = "Age group") +
+  labs(title = "Age", x = NULL, y = "Feature-wise variance") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+p_country_var <- ggplot(df_country_var, aes(x = group, y = variance, fill = group)) +
+  geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
+  scale_fill_manual(values = cty_colors, name = "Country") +
+  labs(title = "Country", x = NULL, y = "Feature-wise variance") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+combined_plot_var <- ggarrange(
+  p_sex_var, p_age_var, p_country_var,
+  ncol = 3, nrow = 1,
+  align = "hv", 
+  legend = "bottom"
+)
+
+print(combined_plot_var)
+ggsave(
+  filename = "../results/figures/Yatsunenko/leaf_feature_variance_violin.pdf",
+  plot = combined_plot_var,
+  device = "pdf",
+  width = 11,      # inches
+  height = 5,    # inches
+  units = "in"
+)
+```
+
+```{r}
+get_feature_corr_by_group <- function(Phi, group_vec, covariate_name) {
+  group_levels <- levels(group_vec)
+
+  out <- lapply(group_levels, function(g) {
+    idx <- which(group_vec == g)
+    Xg <- Phi[idx, , drop = FALSE]
+    s = c(cor(Xg)[upper.tri(cor(Xg))])
+
+    data.frame(
+      covariate = covariate_name,
+      group = g,
+      corr_stat = as.numeric(s),
+      stringsAsFactors = FALSE
+    )
+  })
+
+ bind_rows(out)
+}
+
+df_sex_corr <- get_feature_corr_by_group(normalized_data, meta$sex, "Sex")
+df_age_corr <- get_feature_corr_by_group(normalized_data, meta$age, "Age")
+df_country_corr <- get_feature_corr_by_group(normalized_data, meta$country, "Country")
+
+p_sex_corr <- ggplot(df_sex_corr, aes(x = group, y = corr_stat, fill = group)) +
+  geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
+  scale_fill_manual(values = sex_colors, name = "Sex") +
+  labs(title = "Sex", x = NULL, y = "Pairwise correlation") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+p_age_corr <- ggplot(df_age_corr, aes(x = group, y = corr_stat, fill = group)) +
+  geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
+  scale_fill_manual(values = age_colors, name = "Age group") +
+  labs(title = "Age", x = NULL, y = "Pairwise correlation") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+p_country_corr <- ggplot(df_country_corr, aes(x = group, y = corr_stat, fill = group)) +
+  geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
+  scale_fill_manual(values = cty_colors, name = "Country") +
+  labs(title = "Country", x = NULL, y = "Pairwise correlation") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+combined_plot_corr <- ggarrange(
+  p_sex_corr, p_age_corr, p_country_corr,
+  ncol = 3, nrow = 1,
+  align = "hv", 
+  legend = "bottom"
+)
+
+print(combined_plot_corr)
+ggsave(
+  filename = "../results/figures/Yatsunenko/leaf_feature_correlation_violin.pdf",
+  plot = combined_plot_corr,
+  device = "pdf",
+  width = 11,      # inches
+  height = 5,    # inches
+  units = "in"
+)
+```

@@ -1,0 +1,153 @@
+---
+title: "Sensitivity analysis on rank"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+niter = 10000
+burnin = niter/2
+load("~/Research_projects/tree_cov_reg/data/processed/processed_obj_malawi_reference")
+colnames(X) = c("Sex", "Age", "USA", "Venezuela", "Intercept")
+n = nrow(Y)
+p = ncol(Y)
+d = ncol(X)
+```
+
+# Posterior mean effect, and posterior covariance effect distributions
+```{r}
+R = 3
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", 1, "_malawi_reference_iter_", 1))
+
+### Posterior mean effects
+post_mean_size_3 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_mean_size_3 = ggplot(post_mean_size_3, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size, rank 3",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+
+### Posterior covariance effects
+post_cov_size_3 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size_3 = ggplot(post_cov_size_3, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size, rank 3",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size_3
+```
+
+# Same thing for different ranks
+```{r}
+R = 4
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", 1, "_malawi_reference_iter_", 1))
+
+### Posterior mean effects
+post_mean_size_4 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size_4[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size_4[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_mean_size_4 = ggplot(post_mean_size_4, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size, rank 4",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+
+### Posterior covariance effects
+post_cov_size_4 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size_4[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size_4[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size_4 = ggplot(post_cov_size_4, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size, rank 4",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size_4
+```
+
+```{r}
+R = 5
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", 1, "_malawi_reference_iter_", 1))
+
+### Posterior mean effects
+post_mean_size_5 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size_5[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size_5[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_mean_size_5 = ggplot(post_mean_size_5, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size, rank 5",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+
+### Posterior covariance effects
+post_cov_size_5 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size_5[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size_5[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size_5 = ggplot(post_cov_size_5, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size, rank 5",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size_5
+```
+
+# Aggregate for figures
+```{r}
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/sensitivity_rank_mean.pdf", width = 11, height = 10)
+ggarrange(p_post_mean_size_3, p_post_mean_size_4, p_post_mean_size_5, nrow = 3, ncol = 1, common.legend = T)
+dev.off()
+```
+
+```{r}
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/sensitivity_rank_cov.pdf", width = 11, height = 10)
+ggarrange(p_post_cov_size_3, p_post_cov_size_4, p_post_cov_size_5, nrow = 3, ncol = 1, common.legend = T)
+dev.off()
+```

@@ -1,0 +1,12 @@
+# .gitignore
+.Rhistory
+core
+.Rproj.user/
+.RData
+renv/
+data/
+config/
+results/
+*.html
+*.pdf
+**/.ipynb_checkpoints/

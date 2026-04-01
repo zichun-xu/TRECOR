@@ -1,0 +1,113 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(ggplot2)
+library(dplyr)
+library(pROC)
+library(mvtnorm)
+
+touses = 1:500
+result_folder = paste0("~/Research_projects/tree_cov_reg/results/output/simu/hyper/")
+ranks = c(1,2,3,4,5)
+niter = 10000
+burnin = niter/2
+```
+
+```{r}
+data_path = "~/Research_projects/tree_cov_reg/data/synthetic/"
+n = 150
+p = 100
+d = 3
+R = 3
+sparse = "sparse"
+Theta_structure  = "tree"
+load(paste0(data_path, "params_", paste("n",n, "p",p, "sparse", Theta_structure, sep="_")))
+
+parameters = data.frame(ac = c(10,10,5), 
+                        ad = c(10,10,5), 
+                        bc = c(1,0.5,1), 
+                        bd = c(1,0.5,1))
+
+graph_true = as.numeric(Theta != 0) %>% matrix(nrow = p)
+graph_true_vec = graph_true[upper.tri(graph_true)]
+R = dim(B)[3]
+
+Sigma <- array(NA, dim = c(p,p,n))
+for(i in 1:n){
+  Sigma[,,i] = Theta
+  for(r in 1:R){
+    Sigma[,,i] = Sigma[,,i] + B[,,r]%*%X[i,]%*%t(X[i,])%*%t(B[,,r])
+  }
+}
+```
+
+```{r}
+roc_data = data.frame(TPR = NA, FPR = NA, PPV = NA, params = NA)
+mse_data <- data.frame(Theta_mean = NA, Theta_sd = NA, 
+                       Sigma_mean = NA, Sigma_sd = NA,
+                       AUC_mean = NA, AUC_sd = NA,
+                      params = NA)
+```
+
+```{r}
+for(par_set in 1:nrow(parameters)){
+  prefix = paste("ac",parameters$ac[par_set], "ad",parameters$ad[par_set], "bc",parameters$bc[par_set], "bd",parameters$bd[par_set], sep="_")
+  WAIC_results <- matrix(NA, nrow = 500, ncol = length(ranks))
+  colnames(WAIC_results) <- as.character(ranks)
+  TPR <- FPR <- PPV <- matrix(NA, nrow = 500, ncol = 1000)
+  AUC <- frobenius_Theta <- frobenius_Sigma <- mse_Theta_post <- mse_Sigma_post <- numeric(500) + NA
+  for(i in 1:500){
+    for(rank in ranks){
+      tryCatch({
+        load(paste0(result_folder, prefix, "_LTNM_R_",rank,"_cov_reg_simulation_results_", i))
+        WAIC_results[i, as.character(rank)] = WAIC
+      },
+      error = function(e){}
+      )
+    }
+    if(all(!is.na(WAIC_results[i,]))){
+      rank_selected = which(WAIC_results[i,] == min(WAIC_results[i,]))[1]
+      load(paste0(result_folder, prefix, "_LTNM_R_",rank_selected, "_cov_reg_simulation_results_", i))
+      TPR[i,] = TFP_pmean[1,]
+      FPR[i,] = TFP_pmean[2,] 
+      PPV[i,] = TFP_pmean[3,]
+      ord = order(TFP_pmean[2,])
+      AUC[i] = sum(diff(TFP_pmean[2,][ord]) * (head(TFP_pmean[1,][ord], -1) + tail(TFP_pmean[2,][ord], -1)) / 2)
+      frobenius_Theta[i] = norm(Theta-Theta_pmean, "F")^2
+      frobenius_Sigma[i] = sum((Sigma - Sigma_pmean)^2)/n
+      mse_Theta_post[i] = mean(mse_Theta)
+      mse_Sigma_post[i] = mean(mse_Sigma)
+    }
+  }
+  TPR_mean = apply(TPR,2,mean,na.rm=T)
+  FPR_mean = apply(FPR,2,mean,na.rm=T)
+  PPV_mean = apply(PPV,2,mean,na.rm=T)
+  roc_data = rbind(roc_data, data.frame(TPR = TPR_mean, FPR = FPR_mean, PPV = PPV_mean, params = paste0("(",parameters$ac[par_set], ",",parameters$ad[par_set], ",",parameters$bc[par_set], ",",parameters$bd[par_set], ")")))
+  mse_data = rbind(mse_data, data.frame(Theta_mean = mean(mse_Theta_post, na.rm=T), Theta_sd = sd(mse_Theta_post, na.rm=T),
+                                        Sigma_mean = mean(mse_Sigma_post, na.rm=T), Sigma_sd = sd(mse_Sigma_post, na.rm=T),
+                                        AUC_mean = mean(AUC, na.rm=T), AUC_sd = sd(AUC, na.rm=T),
+                                        params = paste0("(",parameters$ac[par_set], ",",parameters$ad[par_set], ",",parameters$bc[par_set], ",",parameters$bd[par_set], ")")))
+  WAIC_results[apply(WAIC_results, 1,function(x){all(!is.na(x))}),] %>% apply(1,function(x){which(x == min(x))}) %>% table %>% print()
+}
+```
+
+```{r}
+ggplot(roc_data[-1,], aes(x = FPR, y = TPR, color = as.factor(params))) +
+  geom_line() +
+  labs(title = "ROC Curves",
+       x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Group") +
+  theme_minimal()
+ggplot(roc_data[-1,], aes(x = TPR, y = PPV, color = as.factor(params))) +
+  geom_line() +
+  labs(title = "PR Curves",
+       y = "Positive Prediction Value",
+       x = "True Positive Rate",
+       color = "Group") +
+  theme_minimal()
+mse_data[-1,]
+save(roc_data, mse_data, file = paste0("~/Research_projects/tree_cov_reg/results/tables/simu_hyper_roc_mse"))
+```

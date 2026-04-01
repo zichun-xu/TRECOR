@@ -1,0 +1,222 @@
+---
+title: "MCMC convergence check"
+output: html_notebook
+---
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+R = 4
+niter = 10000
+burnin = niter/2
+load("~/Research_projects/tree_cov_reg/data/processed/processed_obj_malawi_reference")
+colnames(X) = c("Sex", "Age", "USA", "Venezuela", "Intercept")
+n = nrow(Y)
+p = ncol(Y)
+d = ncol(X)
+```
+
+# Randomly select parameters for trace plots
+```{r}
+set.seed(20260222)
+rand_par_ind = c(sample(1:p,1), 
+                 sample(1:p,2), 
+                 c(sample(1:p,1),sample(1:d,1),sample(1:R,1)),
+                 c(sample(1:p,1),sample(1:d,1),sample(1:R,1)),
+                 c(sample(1:p,1),sample(1:d,1)),
+                 c(sample(1:p,1),sample(1:d,1)))
+```
+
+# Trace plot, posterior mean effect, and posterior covariance effect distributions
+```{r}
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", 1, "_malawi_reference_iter_", 1))
+
+### Trace plots
+MCMC_trace_1 = matrix(NA, niter, 6)
+for(iter in 1:niter){
+  MCMC_trace_1[iter,1] = result[[1]][[iter]][rand_par_ind[1],rand_par_ind[1]]
+  MCMC_trace_1[iter,2] = result[[1]][[iter]][rand_par_ind[2],rand_par_ind[3]]
+  MCMC_trace_1[iter,3] = result[[2]][[iter]][rand_par_ind[4],rand_par_ind[5], rand_par_ind[6]]
+  MCMC_trace_1[iter,4] = result[[2]][[iter]][rand_par_ind[7],rand_par_ind[8], rand_par_ind[9]]
+  MCMC_trace_1[iter,5] = result[[3]][[iter]][rand_par_ind[10],rand_par_ind[11]]
+  MCMC_trace_1[iter,6] = result[[3]][[iter]][rand_par_ind[12],rand_par_ind[13]]
+}
+
+### Posterior mean effects
+post_mean_size_1 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size_1[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size_1[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_mean_size_1 = ggplot(post_mean_size_1, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size, Chain 1",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+
+### Posterior covariance effects
+post_cov_size_1 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size_1[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size_1[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size_1 = ggplot(post_cov_size_1, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size, Chain 1",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size_1
+
+```
+
+# Same thing for different chains
+```{r}
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", 2, "_malawi_reference_iter_", 1))
+
+MCMC_trace_2 = matrix(NA, niter, 6)
+for(iter in 1:niter){
+  MCMC_trace_2[iter,1] = result[[1]][[iter]][rand_par_ind[1],rand_par_ind[1]]
+  MCMC_trace_2[iter,2] = result[[1]][[iter]][rand_par_ind[2],rand_par_ind[3]]
+  MCMC_trace_2[iter,3] = result[[2]][[iter]][rand_par_ind[4],rand_par_ind[5], rand_par_ind[6]]
+  MCMC_trace_2[iter,4] = result[[2]][[iter]][rand_par_ind[7],rand_par_ind[8], rand_par_ind[9]]
+  MCMC_trace_2[iter,5] = result[[3]][[iter]][rand_par_ind[10],rand_par_ind[11]]
+  MCMC_trace_2[iter,6] = result[[3]][[iter]][rand_par_ind[12],rand_par_ind[13]]
+}
+
+post_mean_size_2 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size_2[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size_2[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+
+p_post_mean_size_2 = ggplot(post_mean_size_2, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size, Chain 2",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+
+post_cov_size_2 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size_2[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size_2[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size_2 = ggplot(post_cov_size_2, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size, Chain 2",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size_2
+```
+
+```{r}
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", 3, "_malawi_reference_iter_", 1))
+
+MCMC_trace_3 = matrix(NA, niter, 6)
+for(iter in 1:niter){
+  MCMC_trace_3[iter,1] = result[[1]][[iter]][rand_par_ind[1],rand_par_ind[1]]
+  MCMC_trace_3[iter,2] = result[[1]][[iter]][rand_par_ind[2],rand_par_ind[3]]
+  MCMC_trace_3[iter,3] = result[[2]][[iter]][rand_par_ind[4],rand_par_ind[5], rand_par_ind[6]]
+  MCMC_trace_3[iter,4] = result[[2]][[iter]][rand_par_ind[7],rand_par_ind[8], rand_par_ind[9]]
+  MCMC_trace_3[iter,5] = result[[3]][[iter]][rand_par_ind[10],rand_par_ind[11]]
+  MCMC_trace_3[iter,6] = result[[3]][[iter]][rand_par_ind[12],rand_par_ind[13]]
+}
+
+post_mean_size_3 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_mean_size_3 = ggplot(post_mean_size_3, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size, Chain 3",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+
+### Posterior covariance effects
+post_cov_size_3 = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size_3[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size_3 = ggplot(post_cov_size_3, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size, Chain 3",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size_3
+```
+
+# Aggregate for figures
+```{r}
+glist = list()
+for(j in 1:6){
+  dat = data.frame(iter = 1:niter, chain_1 = MCMC_trace_1[,j], chain_2 = MCMC_trace_2[,j], chain_3 = MCMC_trace_3[,j])
+  dat = dat[dat$iter <= 1000,]
+  dat = melt(dat, id.var = "iter")
+  colnames(dat) = c("Iteration", "Chain", "Value")
+  glist = c(glist, list(
+    ggplot(dat, aes(x = Iteration, y = Value, color = Chain))+geom_line(alpha = 0.7)+labs(
+    x = "Iteration",
+    y = "Parameter value"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_color_manual(
+    values = c(
+    "chain_1" = "#0072B2",  # blue
+    "chain_2" = "salmon",  # orange
+    "chain_3" = "#009E73"   # green
+  ),
+    labels = c("chain_1" = "1", "chain_2" = "2", "chain_3"="3"),
+    name = "Chain"
+  )))
+}
+
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/MCMC_convergence.pdf", width = 11, height = 7.5)
+ggarrange(plotlist = glist, nrow = 2, ncol = 3, common.legend = T, legend = "bottom", labels = c("(a)", "(b)", "(c)", "(d)", "(e)", "(f)"), font.label = list(size = 14, face = "plain"),
+          label.x = -0.02, label.y = 1.00)
+dev.off()
+```
+
+```{r}
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/sensitivity_MCMC_mean.pdf", width = 13, height = 10)
+ggarrange(p_post_mean_size_1, p_post_mean_size_2, p_post_mean_size_3, nrow = 3, ncol = 1, common.legend = T, legend = "bottom")
+dev.off()
+```
+
+```{r}
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/sensitivity_MCMC_cov.pdf", width = 11, height = 10)
+ggarrange(p_post_cov_size_1, p_post_cov_size_2, p_post_cov_size_3, nrow = 3, ncol = 1, common.legend = T, legend = "bottom")
+dev.off()
+```
+

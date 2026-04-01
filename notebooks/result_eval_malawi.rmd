@@ -1,0 +1,376 @@
+---
+title: "result_eval_malawi_reference"
+output: html_document
+date: "2025-11-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+```{r}
+library(phyloseq)
+library(microbiome)
+library(igraph)
+library(data.tree)
+library(ape)
+library(ggplot2)
+library(dplyr)
+library(mvtnorm)
+library(pheatmap)
+library(patchwork)
+library(ggtree)
+library(ggraph)
+library(ggnewscale)
+source("~/Research_projects/tree_cov_reg/R/helper.R")
+source("~/Research_projects/tree_cov_reg/config/config_real_data.R")
+chain = 1 # default use the chain 1
+color_palette = colorRampPalette(c("blue", "white", "red"))(100)
+breaks_values = seq(-1, 1, length.out = 101)
+```
+
+```{r}
+load("~/Research_projects/tree_cov_reg/data/processed/processed_obj_malawi_reference")
+colnames(X) = c("Sex", "Age", "USA", "Venezuela", "Intercept")
+n = nrow(Y)
+p = ncol(Y)
+d = ncol(X)
+colnames(Y) = colnames(adj)[1:p]
+leaf_nodes = phy_tree$tip.label[as.integer(colnames(adj)[(p+1):(2*p+1)])]
+phy_tree_phylo = treeio::as.phylo(phy_tree)
+```
+
+Obtain internal nodes order based on DFS.
+```{r}
+g <- graph_from_adjacency_matrix(adj, mode = "directed")
+in_degrees <- igraph::degree(g, mode = "in")
+root_node <- V(g)[in_degrees == 0]
+out_degrees <- igraph::degree(g, mode = "out")
+internal_nodes <- V(g)[out_degrees > 0]
+dfs_result <- dfs(g, root = root_node, order = TRUE, unreachable = FALSE)
+dfs_order <- as.numeric(dfs_result$order) 
+internal_dfs_order <- dfs_order[dfs_order %in% as.numeric(internal_nodes)]
+```
+
+```{r}
+WAIC_results <- numeric(length(ranks))
+for(rank in ranks){
+  load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", rank, "_cov_reg_chain_", chain, "_malawi_reference_iter_", 1))
+  WAIC_results[rank] = WAIC
+}
+WAIC_results
+```
+
+```{r}
+R = 4
+load(paste0("~/Research_projects/tree_cov_reg/results/output/Yatsunenko/LTNM_R_", R, "_cov_reg_chain_", chain, "_malawi_reference_iter_", 1))
+```
+
+### Mean level analysis
+
+Posterior distribution of effect sizes for each covariate
+```{r}
+post_mean_size = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_mean_size[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[3]], function(x){sqrt(sum(x[,j]^2))})[(burnin+1):niter])/sqrt(p)
+ post_mean_size[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_mean_size = ggplot(post_mean_size, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200) + 
+  labs(
+    title = "Posterior mean effect size",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_mean_size
+```
+
+### Covariance-level analysis
+
+Posterior distribution of effect sizes for each covariate
+```{r}
+post_cov_size = data.frame(size = numeric((niter-burnin)*(d-1)), group = numeric((niter-burnin)*(d-1)))
+for(j in 1:(d-1)){
+ post_cov_size[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),1] = unlist(lapply(result[[2]], function(x){norm(x[,j,], "F")})[(burnin+1):niter])/sqrt(p*R)
+ post_cov_size[((j-1)*(niter-burnin)+1):(j*(niter-burnin)),2] = colnames(X)[j]
+}
+p_post_cov_size = ggplot(post_cov_size, aes(x = size, fill = group)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), position = "identity", alpha = 0.8, bins = 200)  + 
+  labs(
+    title = "Posterior covariance effect size",
+    x = "Effect size",
+    y = "Frequencies",
+    fill = "Covariates"
+  ) +
+  theme_minimal(base_size = 14) + 
+  scale_fill_brewer(palette = "Set2")
+p_post_cov_size
+```
+
+
+```{r}
+p_post_size = (p_post_mean_size + p_post_cov_size) + plot_layout(axes = "collect", guides = "collect") & theme(legend.position = "bottom") & scale_y_continuous(limits = c(0, 0.06))
+
+plot(p_post_size)
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/post_size_hist.pdf", width = 11, height = 7)
+plot(p_post_size)
+dev.off()
+```
+
+Differential correlation network
+```{r}
+DiffNetwork = function(result, X1, X2, niter = length(result[[1]]), burnin = niter/2, p = dim(result[[2]][[1]])[1], R = dim(result[[2]][[1]])[3]){
+  #' Compute the differential correlation network with covariate X1 and X2
+  diff_list = array(NA, dim = c(niter-burnin, p, p))
+  for(iter in (burnin+1):niter){
+    Theta_1 <- Theta_2 <- result[[1]][[iter]]
+    for(r in 1:R){
+      Theta_1 = Theta_1 + result[[2]][[iter]][,,r]%*%X1%*%t(X1)%*%t(result[[2]][[iter]][,,r])
+      Theta_2 = Theta_2 + result[[2]][[iter]][,,r]%*%X2%*%t(X2)%*%t(result[[2]][[iter]][,,r])
+    }
+    diff_list[iter-burnin,,] = (cov2cor(Theta_1)-cov2cor(Theta_2))/2
+  }
+  
+  graph_diff = GraphSelect(diff_list, 0.1, 0.05)
+  post_diff = apply(diff_list, c(2,3), mean)
+  post_diff_sparse = post_diff
+  post_diff_sparse[graph_diff == 0] = 0
+  post_diff_L = apply(diff_list, c(2,3), quantile, probs = 0.025)
+  post_diff_R = apply(diff_list, c(2,3), quantile, probs = 0.975)
+  return(list(post_diff, post_diff_sparse, post_diff_L, post_diff_R))
+}
+```
+
+```{r}
+sex_diff = DiffNetwork(result, c(0,0,0,0,1), c(1,0,0,0,1))
+print(mean(sex_diff[[3]][upper.tri(sex_diff[[3]])] < 0 & sex_diff[[4]][upper.tri(sex_diff[[4]])] >0))
+print(sum(sex_diff[[2]][upper.tri(sex_diff[[2]])] != 0))
+pheatmap(sex_diff[[1]], cluster_rows = F, cluster_cols = F, color = color_palette, breaks = breaks_values)
+```
+
+```{r}
+age_diff = DiffNetwork(result, c(0,0,0,0,1), c(0,1,0,0,1))
+print(mean(age_diff[[3]][upper.tri(age_diff[[3]])] < 0 & age_diff[[4]][upper.tri(age_diff[[4]])] >0))
+print(sum(age_diff[[2]][upper.tri(age_diff[[2]])] != 0))
+pheatmap(age_diff[[1]], cluster_rows = F, cluster_cols = F, color = color_palette, breaks = breaks_values)
+age_diff_sparse = age_diff[[2]]
+colnames(age_diff_sparse) <- rownames(age_diff_sparse) <- colnames(adj)[1:p]
+
+age_diff_long = reshape2::melt(age_diff_sparse, na.rm = TRUE)
+age_diff_long = age_diff_long[as.numeric(age_diff_long$Var1) < as.numeric(age_diff_long$Var2), ]
+age_diff_long = age_diff_long[order(-abs(age_diff_long$value)), ]
+print(age_diff_long[1:10,])
+
+meta_group_age = data.frame(node = colnames(adj), group = "0", stringsAsFactors = FALSE)
+meta_group_age$node <- as.integer(meta_group_age$node)
+meta_group_age[meta_group_age$node %in% unique(c(age_diff_long[1:10,1], age_diff_long[1:10,2])),2] = "1"
+ggtree(phy_tree_phylo) %<+% meta_group_age + geom_nodepoint(aes(color = group), size = 3) +
+  geom_tiplab() +
+  theme_tree2()
+
+age_high_degree = names(sort(colMeans(abs(age_diff_sparse)), decreasing = T))[1]
+age_diff_leaves = phy_tree$tip.label[as.integer(FindLeaf(adj, as.character(age_high_degree)))]
+```
+
+
+```{r}
+usa_diff = DiffNetwork(result, c(0,0,0,0,1), c(0,0,1,0,1))
+print(mean(usa_diff[[3]][upper.tri(usa_diff[[3]])] < 0 & usa_diff[[4]][upper.tri(usa_diff[[4]])] >0))
+print(sum(usa_diff[[2]][upper.tri(usa_diff[[2]])] != 0))
+pheatmap(usa_diff[[1]], cluster_rows = F, cluster_cols = F, color = color_palette, breaks = breaks_values)
+usa_diff_sparse = usa_diff[[2]]
+colnames(usa_diff_sparse) <- rownames(usa_diff_sparse) <- colnames(adj)[1:p]
+
+usa_diff_long = reshape2::melt(usa_diff_sparse, na.rm = TRUE)
+usa_diff_long = usa_diff_long[as.numeric(usa_diff_long$Var1) < as.numeric(usa_diff_long$Var2), ]
+usa_diff_long = usa_diff_long[order(-abs(usa_diff_long$value)), ]
+print(usa_diff_long[1:10,])
+
+meta_group_usa = data.frame(node = colnames(adj), group = "0", stringsAsFactors = FALSE)
+meta_group_usa$node <- as.integer(meta_group_usa$node)
+meta_group_usa[meta_group_usa$node %in% unique(c(usa_diff_long[1:10,1], usa_diff_long[1:10,2])),2] = "1"
+ggtree(phy_tree_phylo) %<+% meta_group_usa + geom_nodepoint(aes(color = group), size = 3) +
+  geom_tiplab() +
+  theme_tree2()
+
+usa_high_degree = names(sort(colMeans(abs(usa_diff_sparse)), decreasing = T))[1]
+usa_diff_leaves = phy_tree$tip.label[as.integer(FindLeaf(adj, as.character(usa_high_degree)))]
+```
+
+```{r}
+vene_diff = DiffNetwork(result, c(0,0,0,0,1), c(0,0,0,1,1))
+print(mean(vene_diff[[3]][upper.tri(vene_diff[[3]])] < 0 & vene_diff[[4]][upper.tri(vene_diff[[4]])] >0))
+print(sum(vene_diff[[2]][upper.tri(vene_diff[[2]])] != 0))
+pheatmap(vene_diff[[1]], cluster_rows = F, cluster_cols = F, color = color_palette, breaks = breaks_values)
+vene_diff_sparse = vene_diff[[2]]
+colnames(vene_diff_sparse) <- rownames(vene_diff_sparse) <- colnames(adj)[1:p]
+
+vene_diff_long = reshape2::melt(vene_diff_sparse, na.rm = TRUE)
+vene_diff_long = vene_diff_long[as.numeric(vene_diff_long$Var1) < as.numeric(vene_diff_long$Var2), ]
+vene_diff_long = vene_diff_long[order(-abs(vene_diff_long$value)), ]
+print(vene_diff_long[1:10,])
+
+meta_group_vene = data.frame(node = colnames(adj), group = "0", stringsAsFactors = FALSE)
+meta_group_vene$node <- as.integer(meta_group_vene$node)
+meta_group_vene[meta_group_vene$node %in% unique(c(vene_diff_long[1:10,1], vene_diff_long[1:10,2])),2] = "1"
+ggtree(phy_tree_phylo) %<+% meta_group_vene + geom_nodepoint(aes(color = group), size = 3) +
+  geom_tiplab() +
+  theme_tree2()
+
+vene_high_degree = names(sort(colMeans(abs(vene_diff_sparse)), decreasing = T))[1]
+vene_diff_leaves = phy_tree$tip.label[as.integer(FindLeaf(adj, as.character(vene_high_degree)))]
+```
+
+### Population network
+```{r}
+pop_list = array(NA, dim = c(niter-burnin, p, p))
+  for(iter in (burnin+1):niter){
+    pop_list[iter-burnin,,] = cov2cor(result[[1]][[iter]])
+  }
+graph_pop = GraphSelect(pop_list, 0.1, 0.05)
+post_pop = apply(pop_list, c(2,3), mean)
+post_pop_sparse = post_pop
+post_pop_sparse[graph_pop == 0] = 0
+colnames(post_pop_sparse) <- rownames(post_pop_sparse) <- colnames(adj)[1:p]
+pheatmap(post_pop_sparse[colnames(adj)[1:p][internal_dfs_order], colnames(adj)[1:p][internal_dfs_order]], cluster_rows = F, cluster_cols = F, color = color_palette, breaks = breaks_values)
+
+pop_long = reshape2::melt(post_pop_sparse, na.rm = TRUE)
+pop_long = pop_long[as.numeric(pop_long$Var1) < as.numeric(pop_long$Var2), ]
+pop_long = pop_long[order(-abs(pop_long$value)), ]
+pop_long$direction = sign(pop_long$value)
+map_sign = c("Positive", "Negative", "Zero")
+names(map_sign) = as.character(c(1,-1,0))
+pop_long$direction = map_sign[as.character(pop_long$direction)]
+pop_long$value = abs(pop_long$value)
+print(pop_long[1:10,])
+
+pop_node_degree = data.frame(node = as.integer(colnames(adj)[1:p]), degree = colSums(abs(post_pop_sparse)))
+```
+
+```{r}
+p_pop_tree = ggtree(phy_tree_phylo, branch.length = "none") %<+% pop_node_degree +
+  coord_flip() + scale_x_reverse() + 
+  
+  # Highlight internal nodes based on degree size and color
+  geom_nodepoint(aes(color = degree), alpha = 0.8, size = 5) +
+  
+  # FIX 1 & 2: Set the white-to-red gradient and unify the Node Degree legend
+  scale_color_gradient(low = "white", high = "black", name = "Degree") +
+  new_scale_color() +
+  
+  # Draw the top 10 correlation edges
+  # FIX 2: Use 'linewidth' instead of 'size' so it doesn't clash with the node size legend
+  geom_taxalink(data = pop_long[1:10,], 
+                mapping = aes(taxa1 = Var1, taxa2 = Var2, linewidth = value, color = direction), alpha = 0.8, curvature = 0.3) +
+  scale_color_manual(name = "Posterior\ncorrelation\nsign", 
+                     values = c("Positive" = "red", "Negative" = "blue")) +
+  
+  # Clean up the edge thickness legend
+  scale_linewidth_continuous(name = "Posterior\ncorrelation\nstrength", range = c(0, 1)) +
+  
+  theme_tree2() +
+  theme(legend.position = "right") + 
+  ggtitle("(B)")
+ggsave(filename = "~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/p_pop_tree.pdf", 
+       plot = p_pop_tree, 
+       width = 7, 
+       height = 7, 
+       device = "pdf")
+```
+
+```{r}
+library(ggplot2)
+
+post_pop_table <- as.data.frame(as.table(post_pop_sparse[internal_dfs_order, internal_dfs_order]))
+colnames(post_pop_table) <- c("i", "j", "value")
+
+p_pop = ggplot(post_pop_table, aes(x = i, y = j, fill = value)) +
+  geom_tile(color = "grey70", linewidth = 0.2) +   # <-- grid lines
+  scale_fill_gradient2(
+    name = "Posterior correlation",
+    low = "blue", high = "red", mid = "white",
+    limits = c(-1, 1)
+  ) +
+  coord_equal() +
+  scale_y_discrete(limits = rev) +  
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text  = element_blank(),   # remove row/col names
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.title = element_text(size = 12),
+    legend.text  = element_text(size = 12),
+    legend.position = "bottom",
+    legend.box = "horizontal")+
+  ggtitle("(A)")
+pdf("~/Research_projects/tree_cov_reg/results/figures/Yatsunenko/p_pop.pdf", width = 7, height = 7)
+p_pop
+dev.off()
+```
+
+### Archived figure
+```{r, eval=FALSE}
+top_nodes = c(pop_long[1:10,1], pop_long[1:10,2]) %>% unique() %>% as.character()
+pop_multigraph = array(NA, dim = c(length(top_nodes),length(top_nodes),2))
+pop_multigraph[,,1] = adj[top_nodes,top_nodes]
+pop_multigraph[,,2] = post_pop_sparse[top_nodes,top_nodes]
+
+### GPT codes
+library(igraph)
+library(tidygraph)
+library(ggraph)
+library(dplyr)
+library(tidyr)
+
+A1 <- pop_multigraph[,,1]  # directed binary
+A2 <- abs(pop_multigraph[,,2])  # undirected weighted (assumed symmetric)
+
+idx_dir <- which(A1 != 0 & !is.na(A1), arr.ind = TRUE)
+edges_dir <- data.frame(
+  from   = top_nodes[idx_dir[,"row"]],
+  to     = top_nodes[idx_dir[,"col"]],
+  type   = "directed",
+  weight = NA_real_
+)
+
+idx_wt <- which(A2 != 0 & !is.na(A2) & upper.tri(A2), arr.ind = TRUE)
+edges_wt <- data.frame(
+  from   = top_nodes[idx_wt[,"row"]],
+  to     = top_nodes[idx_wt[,"col"]],
+  type   = "weighted",
+  weight = A2[idx_wt]
+)
+
+edges_all <- rbind(edges_dir, edges_wt)
+nodes_df  <- data.frame(name = top_nodes, stringsAsFactors = FALSE)
+
+g <- graph_from_data_frame(edges_all, directed = TRUE, vertices = nodes_df)
+
+deg2 <- rowSums(abs(post_pop_sparse))[top_nodes]
+
+# attach to graph as vertex attribute
+V(g)$deg2 <- deg2[V(g)$name]
+
+set.seed(1)
+p_pop_top = ggraph(g, layout = "nicely") +
+  geom_edge_link(
+    aes(filter = (type == "weighted"), width = weight),
+    lineend = "round", colour  = "steelblue", alpha = 0.8, show.legend = TRUE,
+  ) +
+  geom_edge_link(
+    aes(filter = (type == "directed")),
+    arrow   = arrow(length = unit(3, "mm")), end_cap = circle(3, "mm"), colour  = "black", show.legend = FALSE, linetype = 5
+  ) +
+  geom_node_point(aes(size = deg2)) +
+  scale_edge_width(range = c(0.3, 3)) +
+  scale_size(range = c(2, 8)) +
+  labs(edge_width = "Absolute correlation", size = "Degree")+
+  theme_graph() + 
+  theme(
+  legend.title = element_text(size = 18),
+  legend.text  = element_text(size = 16))
+```
