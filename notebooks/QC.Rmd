@@ -13,11 +13,6 @@ Phi_est, estimated log ratio in internal node scale
 phy_tree, phylogenetic tree
 adj, adjacency matrix of the phylogenetic tree
 
-```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = here::here())
-```
-
-
 ```{r}
 library(dplyr)
 library(microbiome)
@@ -252,8 +247,8 @@ sex_col  <- "sex"
 age_col  <- "age"
 usa_col  <- "usa"
 vene_col <- "vene"
-# normalized_data = Phi_est
-normalized_data = otu_CLR
+normalized_data = Phi_est
+# normalized_data = otu_CLR
 
 X_df <- as.data.frame(X)
 
@@ -302,7 +297,7 @@ p_sex_var <- ggplot(df_sex_var, aes(x = group, y = variance, fill = group)) +
   geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
   scale_fill_manual(values = sex_colors, name = "Sex") +
   labs(title = "Sex", x = NULL, y = "Feature-wise variance") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
     plot.title = element_text(face = "bold"),
     legend.position = "right"
@@ -312,7 +307,7 @@ p_age_var <- ggplot(df_age_var, aes(x = group, y = variance, fill = group)) +
   geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
   scale_fill_manual(values = age_colors, name = "Age group") +
   labs(title = "Age", x = NULL, y = "Feature-wise variance") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
     plot.title = element_text(face = "bold"),
     legend.position = "right"
@@ -322,7 +317,7 @@ p_country_var <- ggplot(df_country_var, aes(x = group, y = variance, fill = grou
   geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
   scale_fill_manual(values = cty_colors, name = "Country") +
   labs(title = "Country", x = NULL, y = "Feature-wise variance") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
     plot.title = element_text(face = "bold"),
     legend.position = "right"
@@ -335,12 +330,24 @@ combined_plot_var <- ggarrange(
   legend = "bottom"
 )
 
+combined_plot_var <- annotate_figure(
+  combined_plot_var,
+  top = text_grob(
+    "(A)", 
+    color = "black", 
+    face = "bold", 
+    size = 16,
+    hjust = 0, # Tells the text to left-justify
+    x = 0
+  )
+)
+
 print(combined_plot_var)
 ggsave(
-  filename = "../results/figures/Yatsunenko/leaf_feature_variance_violin.pdf",
+  filename = "../results/figures/Yatsunenko/feature_variance_violin.pdf",
   plot = combined_plot_var,
   device = "pdf",
-  width = 11,      # inches
+  width = 14,      # inches
   height = 5,    # inches
   units = "in"
 )
@@ -374,7 +381,7 @@ p_sex_corr <- ggplot(df_sex_corr, aes(x = group, y = corr_stat, fill = group)) +
   geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
   scale_fill_manual(values = sex_colors, name = "Sex") +
   labs(title = "Sex", x = NULL, y = "Pairwise correlation") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
     plot.title = element_text(face = "bold"),
     legend.position = "right"
@@ -384,7 +391,7 @@ p_age_corr <- ggplot(df_age_corr, aes(x = group, y = corr_stat, fill = group)) +
   geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
   scale_fill_manual(values = age_colors, name = "Age group") +
   labs(title = "Age", x = NULL, y = "Pairwise correlation") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
     plot.title = element_text(face = "bold"),
     legend.position = "right"
@@ -394,7 +401,7 @@ p_country_corr <- ggplot(df_country_corr, aes(x = group, y = corr_stat, fill = g
   geom_violin(trim = TRUE, alpha = 0.85, color = "gray25") +
   scale_fill_manual(values = cty_colors, name = "Country") +
   labs(title = "Country", x = NULL, y = "Pairwise correlation") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 16) +
   theme(
     plot.title = element_text(face = "bold"),
     legend.position = "right"
@@ -407,12 +414,24 @@ combined_plot_corr <- ggarrange(
   legend = "bottom"
 )
 
+combined_plot_corr <- annotate_figure(
+  combined_plot_corr,
+  top = text_grob(
+    "(B)", 
+    color = "black", 
+    face = "bold", 
+    size = 16,
+    hjust = 0, # Tells the text to left-justify
+    x = 0
+  )
+)
+
 print(combined_plot_corr)
 ggsave(
-  filename = "../results/figures/Yatsunenko/leaf_feature_correlation_violin.pdf",
+  filename = "../results/figures/Yatsunenko/feature_correlation_violin.pdf",
   plot = combined_plot_corr,
   device = "pdf",
-  width = 11,      # inches
+  width = 14,      # inches
   height = 5,    # inches
   units = "in"
 )
